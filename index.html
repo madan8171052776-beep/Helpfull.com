@@ -10,6 +10,7 @@
         .gradient-bg { background: linear-gradient(135deg, #0f172a, #1e293b, #3b82f6); }
         video { border-radius: 2rem; background: #000; width: 100%; max-width: 650px; border: 4px solid rgba(255,255,255,0.1); }
         .mirror { transform: scaleX(-1); }
+        .no-mirror { transform: scaleX(1); }
     </style>
 </head>
 <body class="gradient-bg min-h-screen p-4 flex flex-col items-center font-sans text-white">
@@ -35,7 +36,7 @@
                 </button>
             </div>
             <div class="mt-8 p-4 bg-yellow-50 rounded-2xl border border-yellow-100">
-                <p class="text-yellow-800 text-xs font-semibold">Dhyan dein: Dono devices ek hi Wi-Fi par hon toh best hai.</p>
+                <p class="text-yellow-800 text-xs font-semibold">Dhyan dein: Internet ya Wi-Fi dono par chalega.</p>
             </div>
         </div>
 
@@ -48,15 +49,18 @@
             </div>
             
             <div class="mt-8 space-y-4">
-                <div id="sender-controls" class="hidden">
-                    <button onclick="location.reload()" class="w-full bg-red-500 py-5 rounded-2xl font-black text-lg">Stop Stream</button>
+                <div id="sender-controls" class="hidden flex flex-col gap-4">
+                    <button onclick="switchCamera()" class="w-full bg-indigo-600 py-6 rounded-2xl font-black text-xl shadow-xl flex items-center justify-center gap-3">
+                        🔄 CAMERA BADLO (BACK/FRONT)
+                    </button>
+                    <button onclick="location.reload()" class="w-full bg-red-500 py-4 rounded-xl font-bold">Stop Stream</button>
                 </div>
                 
                 <div id="receiver-controls" class="hidden">
                     <button id="unmute-btn" onclick="unmute()" class="w-full bg-blue-500 py-6 rounded-3xl font-black text-2xl shadow-2xl">
                         🔊 Sound On Karein
                     </button>
-                    <p class="text-center text-gray-500 mt-4 text-sm">Agar awaaz nahi aa rahi toh "Sound On" dabayein.</p>
+                    <p class="text-center text-gray-500 mt-4 text-sm">PC par awaaz ke liye button dabayein.</p>
                 </div>
             </div>
         </div>
@@ -66,8 +70,9 @@
     <script>
         let peer;
         let currentStream;
-        // Unique ID based on domain name to avoid conflict
-        const peerId = "lucky-pro-secure-" + window.location.hostname.replace(/\./g, '-'); 
+        let facingMode = "user"; 
+        // Unique Secret ID based on your hostname
+        const peerId = "lucky-pro-global-" + window.location.hostname.replace(/\./g, '-'); 
 
         function initRole(role) {
             document.getElementById('setup-panel').classList.add('hidden');
@@ -78,64 +83,86 @@
 
         async function setupSender() {
             document.getElementById('sender-controls').classList.remove('hidden');
-            document.getElementById('status').innerText = "Camera Access kar raha hoon...";
+            document.getElementById('status').innerText = "Camera Start ho raha hai...";
+
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
 
             try {
-                // Try to get video AND audio
                 currentStream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "user" }, 
+                    video: { facingMode: facingMode }, 
                     audio: true 
-                }).catch(async (err) => {
-                    console.log("Mic error, trying only video");
-                    return await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                }).catch(() => {
+                    return navigator.mediaDevices.getUserMedia({ video: { facingMode: facingMode }, audio: false });
                 });
 
-                document.getElementById('main-video').srcObject = currentStream;
+                const video = document.getElementById('main-video');
+                video.srcObject = currentStream;
+                
+                if (facingMode === "user") {
+                    video.classList.add('mirror');
+                } else {
+                    video.classList.remove('mirror');
+                }
 
-                peer = new Peer(); // Random ID for sender
-                peer.on('open', (id) => {
-                    document.getElementById('status').innerText = "Connecting to PC...";
-                    // Calling the fixed PC ID
-                    const call = peer.call(peerId, currentStream);
-                    
-                    call.on('error', (err) => {
-                        document.getElementById('status').innerText = "Connection Failed. Retrying...";
-                        setTimeout(setupSender, 3000);
+                if (!peer) {
+                    peer = new Peer(); 
+                    peer.on('open', (id) => {
+                        document.getElementById('status').innerText = "Connecting to PC...";
+                        connectToReceiver();
                     });
-
-                    document.getElementById('status').innerText = "Streaming LIVE! ✅";
-                });
+                    
+                    peer.on('error', (err) => {
+                        console.error(err);
+                        document.getElementById('status').innerText = "Error: " + err.type;
+                    });
+                } else {
+                    connectToReceiver();
+                }
             } catch (err) {
-                alert("Permission Allow karein! Browser settings mein Camera/Mic ON karein.");
+                alert("Permission Allow karein! Camera nahi mil raha.");
             }
+        }
+
+        function connectToReceiver() {
+            const call = peer.call(peerId, currentStream);
+            if (call) {
+                document.getElementById('status').innerText = "Streaming LIVE! ✅";
+            }
+        }
+
+        function switchCamera() {
+            facingMode = (facingMode === "user") ? "environment" : "user";
+            setupSender();
         }
 
         function setupReceiver() {
             document.getElementById('receiver-controls').classList.remove('hidden');
-            document.getElementById('status').innerText = "PC: Intezar kar raha hoon...";
+            document.getElementById('status').innerText = "PC: Waiting for Mobile...";
 
-            peer = new Peer(peerId); // PC uses the fixed ID
+            peer = new Peer(peerId); 
 
             peer.on('open', (id) => {
                 document.getElementById('status').innerText = "PC Taiyar hai! Mobile se connect karein.";
             });
 
             peer.on('call', (call) => {
-                document.getElementById('status').innerText = "Aane wali call... Answer kar raha hoon!";
+                document.getElementById('status').innerText = "Connecting...";
                 call.answer(); 
                 
                 call.on('stream', (remoteStream) => {
                     const video = document.getElementById('main-video');
                     video.srcObject = remoteStream;
-                    video.classList.remove('mirror'); // PC side mirroring off
-                    document.getElementById('status').innerText = "Connected! Video/Audio Start. 🎥";
+                    video.classList.remove('mirror'); 
+                    document.getElementById('status').innerText = "Connected! 🎥";
                 });
             });
 
             peer.on('error', (err) => {
                 if(err.type === 'unavailable-id') {
                     document.getElementById('status').innerText = "ID Busy. Refreshing...";
-                    location.reload();
+                    setTimeout(() => location.reload(), 2000);
                 }
             });
         }
